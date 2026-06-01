@@ -29,6 +29,15 @@ services:
       # - FORCE_WIKI_MODE='private'   # activate this line to force wiki private mode
 
     restart: unless-stopped
+    # Join both the private stack network (to reach mongo/elasticsearch by name)
+    # and the shared `coolify` proxy network so Traefik can route to it.
+    networks:
+      - default
+      - coolify
+    labels:
+      # Tell Traefik which network to use to reach this container (it is on more
+      # than one). Without this the proxy may pick the private network and 503.
+      - traefik.docker.network=coolify
     volumes:
       - growi_data:/data
       - page_bulk_export_tmp:/tmp/page-bulk-export
@@ -38,6 +47,8 @@ services:
     # For MongoDB 6.x
     # image: mongo:6.0
     restart: unless-stopped
+    networks:
+      - default
     volumes:
       - mongo_configdb:/data/configdb
       - mongo_db:/data/db
@@ -54,6 +65,8 @@ services:
   elasticsearch-init:
     image: busybox:1.36
     command: ["sh", "-c", "chown -R 1000:0 /usr/share/elasticsearch/data && echo 'es data dir ownership fixed'"]
+    networks:
+      - default
     volumes:
       - es_data:/usr/share/elasticsearch/data
     restart: "no"
@@ -73,6 +86,8 @@ services:
     depends_on:
       elasticsearch-init:
         condition: service_completed_successfully
+    networks:
+      - default
     environment:
       # single-node disables the production bootstrap checks (e.g. the
       # vm.max_map_count check) that cannot be satisfied on managed hosts where
@@ -99,8 +114,18 @@ services:
   pdf-converter:
     image: growilabs/pdf-converter:1
     restart: unless-stopped
+    networks:
+      - default
     volumes:
       - page_bulk_export_tmp:/tmp/page-bulk-export
+
+networks:
+  # Private network for intra-stack communication (mongo / elasticsearch).
+  default:
+  # Coolify's shared proxy network; the Traefik reverse proxy lives here, so the
+  # `app` service must join it to be reachable from outside.
+  coolify:
+    external: true
 
 volumes:
   growi_data:
