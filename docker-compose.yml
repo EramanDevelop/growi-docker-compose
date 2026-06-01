@@ -1,39 +1,17 @@
 version: '3'
 
 services:
+  # DIAGNOSTIC: read and print the captured Elasticsearch startup log so it is
+  # visible through Coolify's application logs (which only show the app service).
   app:
-    image: growilabs/growi:7
-    ports:
-      - 127.0.0.1:3000:3000    # localhost only by default
-    links:
-      - mongo:mongo
-      - elasticsearch:elasticsearch
-    depends_on:
-        mongo:
-          condition: service_started
-        elasticsearch:
-          condition: service_started
-    environment:
-      - MONGO_URI=mongodb://mongo:27017/growi
-      - ELASTICSEARCH_URI=http://elasticsearch:9200/growi
-      - BULK_EXPORT_PDF_CONVERTER_URI=http://pdf-converter:3010
-      - PASSWORD_SEED=changeme
-      # - FILE_UPLOAD=mongodb   # activate this line if you use MongoDB GridFS rather than AWS
-      # - FILE_UPLOAD=local     # activate this line if you use local storage of server rather than AWS
-      # - MATHJAX=1             # activate this line if you want to use MathJax
-      # - PLANTUML_URI=http://  # activate this line and specify if you use your own PlantUML server rather than public plantuml.com
-      # - FORCE_WIKI_MODE='public'    # activate this line to force wiki public mode
-      # - FORCE_WIKI_MODE='private'   # activate this line to force wiki private mode
-
+    image: busybox:1.36
+    command: ["sh", "-c", "while true; do echo '==== ELASTICSEARCH STARTUP LOG ===='; cat /esshared/es-startup.log 2>/dev/null || echo '(no log captured yet)'; echo '==== END ===='; sleep 15; done"]
     restart: unless-stopped
     volumes:
-      - growi_data:/data
-      - page_bulk_export_tmp:/tmp/page-bulk-export
+      - es_shared:/esshared
 
   mongo:
     image: mongo:8.2
-    # For MongoDB 6.x
-    # image: mongo:6.0
     restart: unless-stopped
     volumes:
       - mongo_configdb:/data/configdb
@@ -44,10 +22,6 @@ services:
       timeout: 5s
       retries: 6
 
-  # Ensure the Elasticsearch data volume is owned by the elasticsearch user
-  # (uid 1000). A freshly created named volume can be root-owned, which makes
-  # Elasticsearch fail at start-up with an AccessDeniedException before it ever
-  # binds to 9200 (observed as ECONNREFUSED from the app).
   elasticsearch-init:
     image: busybox:1.36
     command: ["sh", "-c", "chown -R 1000:0 /usr/share/elasticsearch/data && echo 'es data dir ownership fixed'"]
@@ -56,39 +30,24 @@ services:
     restart: "no"
 
   elasticsearch:
-    # Build a local image with the Japanese full-text search plugins
-    # (analysis-kuromoji / analysis-icu) baked in. This avoids downloading the
-    # plugins on every container start, which fails on hosts with restricted /
-    # proxied outbound network access (e.g. Coolify) and makes ES crash-loop.
     build:
       context: ./elasticsearch/v9
       dockerfile: Dockerfile
-    # For Elasticsearch 8.x
-    # build:
-    #   context: ./elasticsearch/v8
-    #   dockerfile: Dockerfile
     depends_on:
       elasticsearch-init:
         condition: service_completed_successfully
+    # DIAGNOSTIC: capture stdout/stderr to a shared volume for inspection.
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["/usr/local/bin/docker-entrypoint.sh eswrapper 2>&1 | tee /esshared/es-startup.log"]
     environment:
-      # single-node disables the production bootstrap checks (e.g. the
-      # vm.max_map_count check) that cannot be satisfied on managed hosts where
-      # kernel parameters are not tunable.
       - discovery.type=single-node
-      # Do not require mlockall: many managed hosts cap the memlock ulimit, and
-      # a failed lock would otherwise crash the node.
       - bootstrap.memory_lock=false
-      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"  # increase amount if you have enough memory
-      - LOG4J_FORMAT_MSG_NO_LOOKUPS=true # CVE-2021-44228 mitigation for Elasticsearch <= 6.8.20/7.16.0
+      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"
+      - LOG4J_FORMAT_MSG_NO_LOOKUPS=true
     restart: unless-stopped
     volumes:
       - es_data:/usr/share/elasticsearch/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 60s
+      - es_shared:/esshared
 
   pdf-converter:
     image: growilabs/pdf-converter:1
@@ -101,4 +60,5 @@ volumes:
   mongo_configdb:
   mongo_db:
   es_data:
+  es_shared:
   page_bulk_export_tmp:
