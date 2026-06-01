@@ -45,30 +45,36 @@ services:
       retries: 6
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.3.3
+    # Build a local image with the Japanese full-text search plugins
+    # (analysis-kuromoji / analysis-icu) baked in. This avoids downloading the
+    # plugins on every container start, which fails on hosts with restricted /
+    # proxied outbound network access (e.g. Coolify) and makes ES crash-loop.
+    build:
+      context: ./elasticsearch/v9
+      dockerfile: Dockerfile
     # For Elasticsearch 8.x
-    # image: docker.elastic.co/elasticsearch/elasticsearch:8.19.14
+    # build:
+    #   context: ./elasticsearch/v8
+    #   dockerfile: Dockerfile
     environment:
-      - bootstrap.memory_lock=true
-      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"  # increase amount if you have enough memory
+      # single-node disables the production bootstrap checks (e.g. the
+      # vm.max_map_count check) that cannot be satisfied on managed hosts where
+      # kernel parameters are not tunable.
+      - discovery.type=single-node
+      # Do not require mlockall: many managed hosts cap the memlock ulimit, and
+      # a failed lock would otherwise crash the node.
+      - bootstrap.memory_lock=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"  # increase amount if you have enough memory
       - LOG4J_FORMAT_MSG_NO_LOOKUPS=true # CVE-2021-44228 mitigation for Elasticsearch <= 6.8.20/7.16.0
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
     restart: unless-stopped
     volumes:
       - es_data:/usr/share/elasticsearch/data
-      - ./elasticsearch/v9/config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml
-      - ./elasticsearch/v9/config/elasticsearch-plugins.yml:/usr/share/elasticsearch/config/elasticsearch-plugins.yml
-      # For Elasticsearch 8.x
-      #- ./elasticsearch/v8/config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml
-      #- ./elasticsearch/v8/config/elasticsearch-plugins.yml:/usr/share/elasticsearch/config/elasticsearch-plugins.yml
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s"]
       interval: 10s
       timeout: 5s
-      retries: 6
+      retries: 12
+      start_period: 60s
 
   pdf-converter:
     image: growilabs/pdf-converter:1
