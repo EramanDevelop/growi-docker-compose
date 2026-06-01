@@ -16,6 +16,9 @@ services:
     environment:
       - MONGO_URI=mongodb://mongo:27017/growi
       - ELASTICSEARCH_URI=http://elasticsearch:9200/growi
+      # Allow slow index creation (kuromoji dictionary load) to finish on small,
+      # memory-constrained hosts instead of timing out (default 8000ms).
+      - ELASTICSEARCH_REQUEST_TIMEOUT=60000
       - BULK_EXPORT_PDF_CONVERTER_URI=http://pdf-converter:3010
       - PASSWORD_SEED=changeme
       # - FILE_UPLOAD=mongodb   # activate this line if you use MongoDB GridFS rather than AWS
