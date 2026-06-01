@@ -15,6 +15,10 @@ services:
           condition: service_healthy
     environment:
       - MONGO_URI=mongodb://mongo:27017/growi
+      # Public site URL. Required behind a TLS-terminating reverse proxy so GROWI
+      # accepts requests whose Origin is the external https URL (otherwise it
+      # rejects them with "Invalid request (origin check failed ...)").
+      - APP_SITE_URL=https://doc.eraman.site
       - ELASTICSEARCH_URI=http://elasticsearch:9200/growi
       # Allow slow index creation (kuromoji dictionary load) to finish on small,
       # memory-constrained hosts instead of timing out (default 8000ms).
